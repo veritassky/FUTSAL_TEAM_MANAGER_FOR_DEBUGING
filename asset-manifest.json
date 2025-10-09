@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.2ebb43c7.css",
+    "main.js": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.bc4420d2.js",
+    "index.html": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/index.html",
+    "main.2ebb43c7.css.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.2ebb43c7.css.map",
+    "main.bc4420d2.js.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.bc4420d2.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.2ebb43c7.css",
+    "static/js/main.bc4420d2.js"
+  ]
+}
