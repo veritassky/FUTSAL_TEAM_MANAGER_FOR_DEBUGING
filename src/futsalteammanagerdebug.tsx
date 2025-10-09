@@ -232,7 +232,7 @@ const FutsalTeamManager = () => {
     
     const renderTeamSetup = () => {
         const scoreA = teams.yellow.reduce((sum, p) => sum + p.level, 0);
-        const scoreB = teams.blue.reduce((sum, p => sum + p.level, 0);
+        const scoreB = teams.blue.reduce((sum, p) => sum + p.level, 0);
         
         return (
             <div className="p-4 space-y-4">
