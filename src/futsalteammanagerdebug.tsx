@@ -1,432 +1,651 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Timer, Play, Pause, RotateCcw, Trash2, CheckCircle, AlertTriangle, ChevronsRight, Home, Trophy, Minus, Plus } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Users, Timer, Play, Pause, RotateCcw, Plus, Trash2, Bell } from 'lucide-react';
 
-// ==============================================================================
-// 1. 상수 정의 및 스케줄 테이블 (최종 확정)
-// ==============================================================================
+const FutsalTeamManagerDebug = () => {
+  // 키퍼 로테이션 스케줄 (8경기 기준)
+  const KEEPER_ROTATION_SCHEDULE = [
+    [1, 2],  // 1경기: 양팀 모두 1번 -> 2번
+    [3, 9],  // 2경기: 양팀 모두 3번 -> 9번
+    [7, 8],  // 3경기: 양팀 모두 7번 -> 8번
+    [4, 5],  // 4경기: 양팀 모두 4번 -> 5번
+    [7, 9],  // 5경기: 양팀 모두 7번 -> 9번
+    [6, 8],  // 6경기: 양팀 모두 6번 -> 8번
+    [3, 5],  // 7경기: 양팀 모두 3번 -> 5번
+    [1, 4],  // 8경기: 양팀 모두 1번 -> 4번
+  ];
 
-type ViewType = 'players' | 'teams' | 'game_play' | 'keeper_alert' | 'player_alert' | 'results_summary' | 'game_end';
+  // 디버깅을 위한 시간 상수 (실제 풋살은 7분/7분, 420초)
+  // 여기서는 6초/6초로 설정하여 테스트를 용이하게 합니다.
+  const KEEPER_CHANGE_INTERVAL_SEC = 6; 
+  const GAME_DURATION_SEC = 12; // 2 * KEEPER_CHANGE_INTERVAL_SEC
 
-interface Player {
-    id: number; 
-    name: string;
-    level: number;
-    team: 'yellow' | 'blue';
-    isKeeper: boolean;
-    onField: boolean;
-    goals: number; 
-    timePlayed: number; 
-}
+  // --- 상태 관리 ---
+  const [currentView, setCurrentView] = useState('players');
+  const [players, setPlayers] = useState([]);
+  const [teams, setTeams] = useState({ teamA: [], teamB: [] });
+  const [benchPlayers, setBenchPlayers] = useState({ teamA: [], teamB: [] });
+  
+  // 타이머 상태
+  const [timerCount, setTimerCount] = useState(0); // 6초 간격 타이머
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [isKeeperChangeTime, setIsKeeperChangeTime] = useState(false);
+  const [currentHalf, setCurrentHalf] = useState(1);
+  const [totalGameTime, setTotalGameTime] = useState(0); // 총 경과 시간 (12초까지)
+  
+  // 경기 상태
+  const [keeperRotation, setKeeperRotation] = useState({ teamA: 1, teamB: 1 });
+  const [currentGame, setCurrentGame] = useState(1);
+  const [playerStats, setPlayerStats] = useState({});
+  const [score, setScore] = useState({ teamA: 0, teamB: 0 }); // ⚽ 스코어 상태 추가 ⚽
+  
+  const [newPlayer, setNewPlayer] = useState({ name: '', level: 1, team: 'yellow' });
+  const [debugLog, setDebugLog] = useState('디버깅 모드');
 
-const GAME_TOTAL_DURATION_SECONDS = 14; 
-const KEEPER_CHANGE_INTERVAL_SECONDS = 7; 
-const TOTAL_PLAYERS_PER_TEAM = 9; 
-const TOTAL_GAMES_TO_PLAY = 8; 
+  // --- 타이머 및 알람 로직 ---
+  useEffect(() => {
+    // 브라우저 알림 권한 요청 (선택 사항)
+    if (Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+  }, []);
 
-// 사용자 제공 '게임 참가 번호' 표 (자동 로테이션 스케줄)
-const GAME_SCHEDULE: { [game: number]: number[] } = {
-    1: [1, 2, 3, 4, 5, 6], 
-    2: [3, 9, 1, 4, 7, 8],
-    3: [7, 8, 2, 5, 6, 9],
-    4: [4, 5, 1, 2, 3, 6],
-    5: [7, 9, 1, 3, 4, 8],
-    6: [6, 8, 2, 5, 7, 9],
-    7: [3, 5, 1, 2, 6, 4],
-    8: [1, 4, 3, 7, 8, 9],
-};
+  const triggerNotification = (message) => {
+    if (Notification.permission === 'granted') {
+        new Notification("풋살팀 매니저 알림", { body: message });
+    }
+    // 🔔 알람 소리 (선택 사항: 실제 알람 소리 재생 로직 추가 가능)
+    setDebugLog(message);
+  };
 
-const ALARM_SOUND_URL = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
-
-
-// ==============================================================================
-// 2. 메인 컴포넌트: FutsalTeamManager
-// ==============================================================================
-
-const FutsalTeamManager = () => {
+  useEffect(() => {
+    if (!isTimerRunning || isKeeperChangeTime) return;
     
-    // 🚨 2-1. 상태 (useState) 정의 블록 (가장 먼저 위치) 🚨
-    const [currentView, setCurrentView] = useState<ViewType>('players');
-    const [players, setPlayers] = useState<Player[]>([]);
-    const [nextPlayerName, setNextPlayerName] = useState('');
-    const [nextPlayerLevel, setNextPlayerLevel] = useState(3);
-    const [teams, setTeams] = useState<{ yellow: Player[], blue: Player[] }>({ yellow: [], blue: [] });
-    const [score, setScore] = useState({ yellow: 0, blue: 0 });
-    const [gameCounter, setGameCounter] = useState(1); 
-    const [timerCount, setTimerCount] = useState(GAME_TOTAL_DURATION_SECONDS);
-    const [isRunning, setIsRunning] = useState(false);
-    const [isKeeperAlert, setIsKeeperAlert] = useState(false); 
-    const [isPlayerAlert, setIsPlayerAlert] = useState(false);
-    const [isSecondHalf, setIsSecondHalf] = useState(false); 
-    const audioRef = useRef<HTMLAudioElement | null>(null);
-    const alarmIntervalRef = useRef<number | null>(null);
+    const timer = setTimeout(() => {
+      setTimerCount(prev => prev + 1);
+      setTotalGameTime(prev => {
+        const nextTotal = prev + 1;
+        setDebugLog(`총 ${formatTime(nextTotal)} 진행중`);
 
-    // 🚨 2-2. 헬퍼 함수 및 로직 정의 블록 (상태 정의 후 위치) 🚨
-    
-    // 알람, 이동, 포맷 함수
-    const startAlarm = useCallback(() => {
-        if (!audioRef.current) {
-            audioRef.current = new Audio(ALARM_SOUND_URL);
-            audioRef.current.loop = true;
+        // 6초(KEEPER_CHANGE_INTERVAL_SEC) 경과 시
+        if (nextTotal % KEEPER_CHANGE_INTERVAL_SEC === 0) {
+          setIsTimerRunning(false);
+          setIsKeeperChangeTime(true);
+          
+          if (nextTotal === GAME_DURATION_SEC) {
+            triggerNotification(`🔔 경기 ${currentGame} 종료! 최종 스코어 ${score.teamA}:${score.teamB}`);
+          } else {
+            triggerNotification(`🔔 ${nextTotal / 60}분 경과! 키퍼 교체 시간!`);
+          }
         }
-        audioRef.current.play().catch(e => console.warn("Audio play failed:", e));
-    }, []);
 
-    const stopAlarm = useCallback(() => {
-        if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-        }
-        if (alarmIntervalRef.current) {
-            clearInterval(alarmIntervalRef.current);
-            alarmIntervalRef.current = null;
-        }
-    }, []);
-
-    const goToSection = (view: ViewType) => { stopAlarm(); setCurrentView(view); };
-    const formatTime = (totalSeconds: number) => String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + String(totalSeconds % 60).padStart(2, '0');
+        return nextTotal;
+      });
+    }, 1000);
     
-    const resetApp = () => {
-        setPlayers([]);
-        setTeams({ yellow: [], blue: [] });
-        setScore({ yellow: 0, blue: 0 });
-        setGameCounter(1);
-        setTimerCount(GAME_TOTAL_DURATION_SECONDS);
-        setIsRunning(false);
-        setIsSecondHalf(false);
-        goToSection('players');
-    };
-    
-    const getPlayerName = useCallback((id: number): string => {
-        const player = teams.yellow.find(p => p.id === id) || teams.blue.find(p => p.id === id);
-        return player ? player.name : `선수 ID ${id}`;
-    }, [teams]);
+    return () => clearTimeout(timer);
+  }, [timerCount, isTimerRunning, isKeeperChangeTime, totalGameTime, currentGame, score.teamA, score.teamB]);
 
+  // --- 스코어 시스템 함수 ---
+  const updateScore = (team, amount) => {
+    setScore(prev => ({
+      ...prev,
+      [team]: Math.max(0, prev[team] + amount)
+    }));
+  };
 
-    const getCurrentSubstitutionInfo = useCallback((game: number) => {
-        const prevSchedule = GAME_SCHEDULE[game - 1] || [];
-        const currentSchedule = GAME_SCHEDULE[game] || [];
-        
-        const playersOut = prevSchedule.filter(id => !currentSchedule.includes(id));
-        const playersIn = currentSchedule.filter(id => !prevSchedule.includes(id));
-        
-        const formatNames = (ids: number[]) => ids.map(id => getPlayerName(id)).join(', ');
+  const resetScore = () => {
+    setScore({ teamA: 0, teamB: 0 });
+  };
+  
+  // --- 기존 함수 유지 및 수정 ---
 
-        return {
-            in: formatNames(playersIn),
-            out: formatNames(playersOut),
-            keeper1Name: getPlayerName(currentSchedule[0]),
-            keeper2Name: getPlayerName(currentSchedule[1]),
-        };
-    }, [getPlayerName]);
-    
-    const updateTeamRosterForNextGame = useCallback((nextGameCounter: number) => {
-        const schedule = GAME_SCHEDULE[nextGameCounter];
-        if (!schedule) return;
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
-        setTeams(prevTeams => {
-            const allPlayers = [...prevTeams.yellow, ...prevTeams.blue];
-            
-            const newPlayers = allPlayers.map(p => {
-                const isPlaying = schedule.includes(p.id);
-                let isKeeper = false;
+  const addPlayer = () => {
+    if (newPlayer.name.trim()) {
+      const newId = Math.max(...players.map(p => p.id), 0) + 1;
+      const player = { ...newPlayer, id: newId };
+      setPlayers([...players, player]);
+      setPlayerStats(prev => ({
+        ...prev,
+        [newId]: { fieldTime: 0, keeperTime: 0, totalGames: 0 }
+      }));
+      setNewPlayer({ name: '', level: 1, team: 'yellow' });
+    }
+  };
 
-                if (isPlaying && nextGameCounter >= 1 && p.id === schedule[0]) {
-                    isKeeper = true;
-                }
-                
-                return { ...p, onField: isPlaying, isKeeper: isKeeper };
-            });
+  const deletePlayer = (id) => {
+    setPlayers(players.filter(p => p.id !== id));
+  };
 
-            const newYellow = newPlayers.filter(p => p.team === 'yellow').sort((a, b) => a.id - b.id);
-            const newBlue = newPlayers.filter(p => p.team === 'blue').sort((a, b) => a.id - b.id);
+  const generateBalancedTeams = () => {
+    if (players.length < 18) {
+      alert('18명 필요 (옐로9 + 블루9)');
+      return;
+    }
 
-            return { yellow: newYellow, blue: newBlue };
-        });
-    }, []);
+    const yellowPlayers = players.filter(p => p.team === 'yellow');
+    const bluePlayers = players.filter(p => p.team === 'blue');
 
-    // 7초 시점 키퍼 교체 로직 (섹션 4 완료 시)
-    const handleKeeperSwap = useCallback(() => {
-        const schedule = GAME_SCHEDULE[gameCounter];
-        if (!schedule || schedule.length < 2) return;
-
-        const keeper1Id = schedule[0]; // 이전 키퍼 (OUT)
-        const keeper2Id = schedule[1]; // 다음 키퍼 (IN)
-
-        setTeams(prevTeams => {
-            const updateTeam = (team: Player[]): Player[] => team.map(p => {
-                if (p.id === keeper1Id) { 
-                    return { ...p, isKeeper: false }; // OUT
-                }
-                if (p.id === keeper2Id) { 
-                    return { ...p, isKeeper: true }; // IN
-                }
-                return p;
-            });
-
-            return { yellow: updateTeam(prevTeams.yellow), blue: updateTeam(prevTeams.blue) };
-        });
-    }, [gameCounter]);
-
-    // 스코어링
-    const handleScore = (team: 'yellow' | 'blue', amount: 1 | -1) => {
-        setScore(prev => ({
-            ...prev,
-            [team]: Math.max(0, prev[team] + amount),
-        }));
-        
-        if (amount === 1) {
-            setTeams(prevTeams => {
-                // 현재 필드 선수 중 임의의 선수에게 득점 부여
-                const scorer = prevTeams[team].find(p => p.onField && !p.isKeeper); 
-                if (scorer) {
-                    const updatedPlayer = { ...scorer, goals: scorer.goals + 1 };
-                    return { 
-                        ...prevTeams, 
-                        [team]: prevTeams[team].map(p => p.id === scorer.id ? updatedPlayer : p)
-                    };
-                }
-                return prevTeams;
-            });
-        }
-    };
-    
-    // ==========================================================================
-    // 3. 타이머 및 알림 로직 (useEffect)
-    // ==========================================================================
-
-    useEffect(() => {
-        if (isRunning && timerCount > 0 && !isKeeperAlert && !isPlayerAlert) {
-            const timer = setInterval(() => {
-                setTimerCount(prev => prev - 1);
-                
-                // 출전 시간 기록 업데이트 
-                setTeams(prev => {
-                    const updateTeam = (team: Player[]) => team.map(p => 
-                        p.onField ? { ...p, timePlayed: p.timePlayed + 1 } : p
-                    );
-                    return { yellow: updateTeam(prev.yellow), blue: updateTeam(prev.blue) };
-                });
-                
-            }, 1000);
-            return () => clearInterval(timer);
-        } else if (timerCount === 0 && isRunning) {
-            setIsRunning(false);
-            
-            if (gameCounter >= TOTAL_GAMES_TO_PLAY) {
-                goToSection('results_summary'); 
-            } else {
-                setIsPlayerAlert(true);
-                startAlarm();
-            }
-        }
-    }, [isRunning, timerCount, isKeeperAlert, isPlayerAlert, gameCounter, goToSection, startAlarm]);
-
-    useEffect(() => {
-        const elapsedSeconds = GAME_TOTAL_DURATION_SECONDS - timerCount;
-
-        if (isRunning && elapsedSeconds === KEEPER_CHANGE_INTERVAL_SECONDS && !isSecondHalf) {
-            setIsRunning(false);
-            setIsKeeperAlert(true); 
-            startAlarm();
-            setIsSecondHalf(true); 
-        }
-    }, [timerCount, isRunning, startAlarm, isSecondHalf]);
-
-    // ==========================================================================
-    // 4. 이벤트 핸들러 및 렌더링 (간소화)
-    // ==========================================================================
-
-    const handleKeeperChangeComplete = () => {
-        handleKeeperSwap(); 
-        stopAlarm();
-        setIsKeeperAlert(false);
-        setIsRunning(true);
-    };
-    
-    const handlePlayerChangeComplete = () => {
-        updateTeamRosterForNextGame(gameCounter + 1); 
-        
-        stopAlarm();
-        setGameCounter(prev => prev + 1);
-        setTimerCount(GAME_TOTAL_DURATION_SECONDS);
-        setIsPlayerAlert(false);
-        setIsRunning(false); 
-        setIsSecondHalf(false);
-        // alert(`경기 ${gameCounter} 종료. 경기 ${gameCounter + 1} 준비 완료.`);
+    const sortByPlayTime = (list) => {
+      return [...list].sort((a, b) => {
+        const aTotal = (playerStats[a.id]?.fieldTime || 0) + (playerStats[a.id]?.keeperTime || 0);
+        const bTotal = (playerStats[b.id]?.fieldTime || 0) + (playerStats[b.id]?.keeperTime || 0);
+        return aTotal - bTotal;
+      });
     };
 
-    const handleAddPlayer = () => {
-        if (!nextPlayerName.trim()) return; 
-        const newPlayer: Player = {
-            id: players.length + 1, 
-            name: nextPlayerName.trim(),
-            level: nextPlayerLevel,
-            team: 'yellow',
-            isKeeper: false,
-            onField: false,
-            goals: 0,
-            timePlayed: 0,
-        };
-        setPlayers([...players, newPlayer]);
-        setNextPlayerName('');
-    };
+    const sortedYellow = sortByPlayTime(yellowPlayers);
+    const sortedBlue = sortByPlayTime(bluePlayers);
+
+    setTeams({ teamA: sortedYellow.slice(0, 6), teamB: sortedBlue.slice(0, 6) });
+    setBenchPlayers({ teamA: sortedYellow.slice(6, 9), teamB: sortedBlue.slice(6, 9) });
+    setCurrentView('teams');
+  };
+
+  const startGame = () => {
+    setCurrentView('game');
+    setTimerCount(0);
+    setTotalGameTime(0);
+    setCurrentHalf(1);
+    resetScore(); // ⚽ 새 경기 시작 시 스코어 초기화 ⚽
     
-    const handleBalanceTeams = () => {
-        if (players.length < TOTAL_PLAYERS_PER_TEAM * 2) {
-             // 9명씩 2팀을 만들지 않고, 9명의 선수가 양 팀을 번갈아 뛴다고 가정 (디버그 단순화)
-            const allNinePlayers = players.slice(0, 9);
-            if (allNinePlayers.length < TOTAL_PLAYERS_PER_TEAM) {
-                alert(`최소 9명 이상의 선수를 등록해야 합니다.`);
-                return;
-            }
-            
-            // ID 1~9로 재설정하여 스케줄 표와 연동
-            const teamYellow = allNinePlayers.map((p, i) => ({ ...p, team: 'yellow', id: i + 1 }));
-            const teamBlue = allNinePlayers.map((p, i) => ({ ...p, team: 'blue', id: i + 1 }));
-            setTeams({ yellow: teamYellow, blue: teamBlue });
-        } else {
-            // 18명 기준의 로직이 있다면 여기에 구현
+    const gameIndex = (currentGame - 1) % KEEPER_ROTATION_SCHEDULE.length;
+    const keepers = KEEPER_ROTATION_SCHEDULE[gameIndex];
+    const scheduleGame = (gameIndex % 8) + 1;
+    
+    setKeeperRotation({ teamA: keepers[0], teamB: keepers[0] });
+    setIsKeeperChangeTime(false);
+    setIsTimerRunning(false);
+    setDebugLog(`경기 ${currentGame} (순서표 ${scheduleGame}경기): 양팀 ${keepers[0]}→${keepers[1]}번 키퍼`);
+    
+    const newStats = { ...playerStats };
+    [...teams.teamA, ...teams.teamB].forEach(player => {
+      newStats[player.id].totalGames += 1;
+    });
+    setPlayerStats(newStats);
+  };
+
+  const completeKeeperChange = () => {
+    const newStats = { ...playerStats };
+    
+    const keeperA = teams.teamA[keeperRotation.teamA - 1];
+    const keeperB = teams.teamB[keeperRotation.teamB - 1];
+    const intervalMin = KEEPER_CHANGE_INTERVAL_SEC / 60;
+    
+    if (keeperA) newStats[keeperA.id].keeperTime += intervalMin;
+    if (keeperB) newStats[keeperB.id].keeperTime += intervalMin;
+    
+    teams.teamA.forEach((player, idx) => {
+      if (idx + 1 !== keeperRotation.teamA) {
+        newStats[player.id].fieldTime += intervalMin;
+      }
+    });
+    teams.teamB.forEach((player, idx) => {
+      if (idx + 1 !== keeperRotation.teamB) {
+        newStats[player.id].fieldTime += intervalMin;
+      }
+    });
+    
+    setPlayerStats(newStats);
+    
+    const gameIndex = (currentGame - 1) % KEEPER_ROTATION_SCHEDULE.length;
+    const keepers = KEEPER_ROTATION_SCHEDULE[gameIndex];
+    
+    if (totalGameTime < GAME_DURATION_SEC) {
+      setKeeperRotation({ teamA: keepers[1], teamB: keepers[1] });
+      setCurrentHalf(2);
+      setIsKeeperChangeTime(false);
+      setIsTimerRunning(true);
+      setDebugLog(`키퍼 교체 완료: 양팀 ${keepers[1]}번, 후반 시작`);
+    } else {
+      endGame();
+    }
+  };
+
+  const endGame = () => {
+    setIsTimerRunning(false);
+    setIsKeeperChangeTime(false);
+    
+    const newStats = { ...playerStats };
+    const intervalSec = KEEPER_CHANGE_INTERVAL_SEC;
+    const remaining = timerCount % intervalSec;
+    
+    if (remaining > 0) {
+      const keeperA = teams.teamA[keeperRotation.teamA - 1];
+      const keeperB = teams.teamB[keeperRotation.teamB - 1];
+      const remainingMin = remaining / 60;
+      
+      if (keeperA) newStats[keeperA.id].keeperTime += remainingMin;
+      if (keeperB) newStats[keeperB.id].keeperTime += remainingMin;
+      
+      teams.teamA.forEach((p, idx) => {
+        if (idx + 1 !== keeperRotation.teamA) {
+          newStats[p.id].fieldTime += remainingMin;
         }
+      });
+      teams.teamB.forEach((p, idx) => {
+        if (idx + 1 !== keeperRotation.teamB) {
+          newStats[p.id].fieldTime += remainingMin;
+        }
+      });
+    }
+    
+    setPlayerStats(newStats);
+    setCurrentGame(prev => prev + 1);
+    setDebugLog(`경기 종료! 최종 스코어: ${score.teamA} 대 ${score.teamB}`);
+    setCurrentView('rotation');
+  };
 
-        updateTeamRosterForNextGame(1);
-        setCurrentView('game_play'); 
+  const suggestSubstitutions = () => {
+    const getWithTime = (list) => {
+      return list.map(p => ({
+        ...p,
+        totalTime: (playerStats[p.id]?.fieldTime || 0) + (playerStats[p.id]?.keeperTime || 0)
+      }));
     };
 
-    // 렌더링 함수들 (이전 답변과 동일)
-    const renderResultsSummary = () => { /* ... (이전 답변과 동일) ... */ };
-    const renderGameEnd = () => { /* ... (이전 답변과 동일) ... */ };
-    const renderKeeperAlert = () => { /* ... (이전 답변과 동일) ... */ };
-    const renderPlayerAlert = () => { /* ... (이전 답변과 동일) ... */ };
+    const teamATime = getWithTime(teams.teamA).sort((a, b) => b.totalTime - a.totalTime);
+    const teamBTime = getWithTime(teams.teamB).sort((a, b) => b.totalTime - a.totalTime);
+    const benchATime = getWithTime(benchPlayers.teamA).sort((a, b) => a.totalTime - b.totalTime);
+    const benchBTime = getWithTime(benchPlayers.teamB).sort((a, b) => a.totalTime - b.totalTime);
+
+    return {
+      teamA: { out: teamATime.slice(0, 3), in: benchATime.slice(0, 3) },
+      teamB: { out: teamBTime.slice(0, 3), in: benchBTime.slice(0, 3) }
+    };
+  };
+
+  const applySubstitutions = () => {
+    const subs = suggestSubstitutions();
     
-    const renderTeamSetup = () => {
-        // ... (섹션 2 라인업 UI - 이전 답변과 동일) ...
-        const scoreY = teams.yellow.reduce((sum, p) => sum + p.level, 0);
-        const scoreB = teams.blue.reduce((sum, p) => sum + p.level, 0);
-        
-        return (
-            <div className="p-4 space-y-4">
-                <h2 className="text-2xl font-bold text-indigo-700">섹션 2: 라인업 및 팀 구성</h2>
-                
-                {teams.yellow.length === 0 ? (
-                    <>
-                    <div className="border p-4 rounded bg-red-50">
-                        <h3 className="font-bold text-red-700">선수 등록 (ID 1~9)</h3>
-                         <input
-                            type="text"
-                            placeholder="이름"
-                            value={nextPlayerName}
-                            onChange={(e) => setNextPlayerName(e.target.value)}
-                            className="p-2 border rounded w-full mb-2"
-                        />
-                        <button onClick={handleAddPlayer} className="w-full py-2 bg-indigo-500 text-white rounded">선수 추가 ({players.length}명)</button>
-                        <ul className="mt-3 text-sm">
-                            {players.map(p => <li key={p.id}>{p.name} (ID {p.id})</li>)}
-                        </ul>
-                    </div>
-                    
-                    <button 
-                        onClick={handleBalanceTeams} 
-                        className="w-full py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition"
-                    >
-                        총 9명으로 팀 자동 배분 실행 (1경기 명단 설정)
-                    </button>
-                    </>
-                ) : (
-                    <>
-                        <div className="flex justify-between items-center p-3 bg-gray-100 rounded-lg">
-                            <h3 className="text-lg font-semibold">밸런스 현황</h3>
-                            <p>💛 Lv: **{scoreY}** vs 💙 Lv: **{scoreB}**</p>
-                        </div>
-                        <button 
-                            onClick={() => goToSection('game_play')} 
-                            className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition"
-                        >
-                            <ChevronsRight className="inline w-5 h-5 mr-2" /> 섹션 3: 경기 진행 시작
-                        </button>
-                    </>
-                )}
+    const newTeamA = [
+      ...teams.teamA.filter(p => !subs.teamA.out.some(out => out.id === p.id)),
+      ...subs.teamA.in
+    ];
+    const newTeamB = [
+      ...teams.teamB.filter(p => !subs.teamB.out.some(out => out.id === p.id)),
+      ...subs.teamB.in
+    ];
+    
+    const newBenchA = [
+      ...benchPlayers.teamA.filter(p => !subs.teamA.in.some(inP => inP.id === p.id)),
+      ...subs.teamA.out
+    ];
+    const newBenchB = [
+      ...benchPlayers.teamB.filter(p => !subs.teamB.in.some(inP => inP.id === p.id)),
+      ...subs.teamB.out
+    ];
+    
+    setTeams({ teamA: newTeamA, teamB: newTeamB });
+    setBenchPlayers({ teamA: newBenchA, teamB: newBenchB });
+    setCurrentView('teams');
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-red-400 via-orange-500 to-yellow-600 p-4">
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white p-6">
+            <h1 className="text-3xl font-bold text-center flex items-center justify-center gap-2">
+              <Timer className="w-8 h-8" />
+              디버깅용 ({KEEPER_CHANGE_INTERVAL_SEC}초 타이머)
+            </h1>
+            <div className="flex justify-center mt-4 space-x-2">
+              {['players', 'teams', 'game', 'rotation'].map((view) => (
+                <button
+                  key={view}
+                  onClick={() => setCurrentView(view)}
+                  className={`px-4 py-2 rounded-lg font-medium ${
+                    currentView === view ? 'bg-white text-red-600' : 'bg-red-500 text-white'
+                  }`}
+                >
+                  {view === 'players' && '선수'}
+                  {view === 'teams' && '팀'}
+                  {view === 'game' && '경기'}
+                  {view === 'rotation' && '교체'}
+                </button>
+              ))}
             </div>
-        );
-    };
+          </div>
 
-    const renderGamePlaySection = () => {
-        const activePlayersY = teams.yellow.filter(p => p.onField);
-        const keeperY = activePlayersY.find(p => p.isKeeper);
-
-        return (
-            <div className="p-4 space-y-4">
-                <h2 className="text-2xl font-bold text-indigo-700">섹션 3: 경기 진행 ({gameCounter}/{TOTAL_GAMES_TO_PLAY} 경기)</h2>
+          <div className="p-6">
+            {currentView === 'players' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">선수 관리</h2>
                 
-                {/* 타이머 및 스코어 */}
-                <div className="text-center bg-gray-100 p-6 rounded-xl shadow-lg space-y-4">
-                    <p className="text-5xl font-extrabold text-gray-800">{formatTime(timerCount)}</p>
-                    <p className="text-sm font-semibold text-red-500">{isSecondHalf ? '후반전 (7초)' : '전반전 (7초)'}</p>
-
-                    <p className="text-lg font-bold text-blue-600">
-                        키퍼: 💛 **{keeperY?.name || '미정'}** (ID: {keeperY?.id})
-                    </p>
-                    
-                    <div className="flex justify-around items-center space-x-4">
-                        <div className="w-1/2 p-3 bg-yellow-200 rounded-lg">
-                            <p className="font-bold text-xl">💛 {score.yellow}</p>
-                            <div className="flex justify-center space-x-2 mt-2">
-                                <button onClick={() => handleScore('yellow', 1)} className="p-1 bg-yellow-500 text-white rounded"><Plus size={20} /></button>
-                                <button onClick={() => handleScore('yellow', -1)} className="p-1 bg-yellow-700 text-white rounded"><Minus size={20} /></button>
-                            </div>
-                        </div>
-                        <div className="w-1/2 p-3 bg-blue-200 rounded-lg">
-                            <p className="font-bold text-xl">💙 {score.blue}</p>
-                            <div className="flex justify-center space-x-2 mt-2">
-                                <button onClick={() => handleScore('blue', 1)} className="p-1 bg-blue-500 text-white rounded"><Plus size={20} /></button>
-                                <button onClick={() => handleScore('blue', -1)} className="p-1 bg-blue-700 text-white rounded"><Minus size={20} /></button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button 
-                        onClick={() => setIsRunning(prev => !prev)} 
-                        className={`w-full py-3 font-bold rounded-lg shadow-md transition ${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'} text-white mt-4`}
+                <div className="bg-gray-50 p-4 rounded-lg mb-6">
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      placeholder="이름"
+                      value={newPlayer.name}
+                      onChange={(e) => setNewPlayer({...newPlayer, name: e.target.value})}
+                      className="flex-1 px-3 py-2 border rounded-lg"
+                    />
+                    <select
+                      value={newPlayer.team}
+                      onChange={(e) => setNewPlayer({...newPlayer, team: e.target.value})}
+                      className="px-3 py-2 border rounded-lg"
                     >
-                        {isRunning ? <Pause className="inline w-5 h-5 mr-2" /> : <Play className="inline w-5 h-5 mr-2" />} 
-                        {isRunning ? '일시정지' : '타이머 시작'}
+                      <option value="yellow">옐로</option>
+                      <option value="blue">블루</option>
+                    </select>
+                    <select
+                      value={newPlayer.level}
+                      onChange={(e) => setNewPlayer({...newPlayer, level: parseInt(e.target.value)})}
+                      className="px-3 py-2 border rounded-lg"
+                    >
+                      <option value={1}>Lv1</option>
+                      <option value={2}>Lv2</option>
+                      <option value={3}>Lv3</option>
+                    </select>
+                    <button
+                      onClick={addPlayer}
+                      className="px-4 py-2 bg-orange-500 text-white rounded-lg flex items-center"
+                    >
+                      <Plus className="w-4 h-4" />
                     </button>
+                  </div>
                 </div>
+
+                <div className="grid gap-3 mb-6">
+                  {players.map(player => (
+                    <div key={player.id} className="flex items-center justify-between p-4 bg-white border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          player.team === 'yellow' ? 'bg-yellow-200' : 'bg-blue-200'
+                        }`}>
+                          {player.team === 'yellow' ? '옐로' : '블루'}
+                        </span>
+                        <span className="font-medium">{player.name}</span>
+                        <span className="text-xs text-gray-500">
+                          {((playerStats[player.id]?.fieldTime || 0) + (playerStats[player.id]?.keeperTime || 0)).toFixed(1)}분
+                        </span>
+                      </div>
+                      <button onClick={() => deletePlayer(player.id)} className="text-red-600">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={generateBalancedTeams}
+                  disabled={players.length < 18}
+                  className="w-full px-6 py-3 bg-orange-600 text-white rounded-lg font-medium"
+                >
+                  팀 구성 ({players.length}/18)
+                </button>
+              </div>
+            )}
+
+            {currentView === 'teams' && teams.teamA.length > 0 && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">팀 구성</h2>
                 
-                {/* 현재 경기 명단 (옐로팀 예시) */}
-                {/* 블루팀 명단도 여기에 표시해야 합니다. */}
-                <div className="mt-6">
-                    <h3 className="text-xl font-semibold border-b pb-2">💛 옐로팀 현재 명단 (6명)</h3>
-                    <ul className="mt-2 text-gray-700 list-disc pl-5">
-                        {activePlayersY.map(p => (
-                            <li key={p.id}>{p.name} (ID {p.id}) {p.isKeeper ? '(KEEPER)' : ''}</li>
+                <div className="grid md:grid-cols-2 gap-6 mb-6">
+                  <div className="bg-yellow-50 p-6 rounded-lg border-2 border-yellow-400">
+                    <h3 className="text-xl font-bold text-yellow-800 mb-4">옐로팀 (Team A)</h3>
+                    {teams.teamA.map((p, idx) => (
+                      <div key={p.id} className="p-2 bg-white rounded mb-2">
+                        #{idx + 1}. {p.name}
+                      </div>
+                    ))}
+                    {benchPlayers.teamA.length > 0 && (
+                      <div className="mt-4">
+                        <div className="font-medium mb-2">벤치</div>
+                        {benchPlayers.teamA.map(p => (
+                          <div key={p.id} className="p-1 bg-gray-100 rounded text-sm mb-1">
+                            {p.name}
+                          </div>
                         ))}
-                    </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-blue-50 p-6 rounded-lg border-2 border-blue-400">
+                    <h3 className="text-xl font-bold text-blue-800 mb-4">블루팀 (Team B)</h3>
+                    {teams.teamB.map((p, idx) => (
+                      <div key={p.id} className="p-2 bg-white rounded mb-2">
+                        #{idx + 1}. {p.name}
+                      </div>
+                    ))}
+                    {benchPlayers.teamB.length > 0 && (
+                      <div className="mt-4">
+                        <div className="font-medium mb-2">벤치</div>
+                        {benchPlayers.teamB.map(p => (
+                          <div key={p.id} className="p-1 bg-gray-100 rounded text-sm mb-1">
+                            {p.name}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-            </div>
-        );
-    };
 
-    return (
-        <div className="min-h-screen bg-gray-50 p-0 sm:p-4 font-sans max-w-md mx-auto">
-            
-            <div className="bg-red-600 text-white p-4 text-center rounded-t-lg shadow-md">
-                <h1 className="text-xl font-bold">Futsal Team Manager</h1>
-                <p className="text-sm mt-1">현재 섹션: **{currentView.toUpperCase()}** (경기 {gameCounter}/{TOTAL_GAMES_TO_PLAY})</p>
-            </div>
+                <div className="text-center">
+                  <button
+                    onClick={startGame}
+                    disabled={currentGame > 8}
+                    className={`px-6 py-3 rounded-lg font-medium ${
+                      currentGame > 8 
+                        ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
+                        : 'bg-orange-600 text-white hover:bg-orange-700'
+                    }`}
+                  >
+                    <Play className="w-5 h-5 inline mr-2" />
+                    {currentGame > 8 ? '모든 경기 완료!' : `경기 ${currentGame} 시작`}
+                  </button>
+                </div>
+              </div>
+            )}
 
-            <div className="bg-white shadow-xl rounded-b-lg min-h-[600px]">
-                {currentView === 'players' && renderTeamSetup()} 
-                {currentView === 'teams' && renderTeamSetup()}
-                {currentView === 'game_play' && renderGamePlaySection()}
-                {currentView === 'results_summary' && renderResultsSummary()} 
-                {currentView === 'game_end' && renderGameEnd()}
-            </div>
+            {currentView === 'game' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6 text-center">경기 {currentGame}</h2>
+                
+                <div className="bg-gray-50 p-6 rounded-lg mb-6 text-center">
+                  <div className="text-sm text-gray-600 mb-2">{debugLog}</div>
+                  <div className="text-4xl font-bold mb-2">{formatTime(timerCount)}</div>
+                  <div className="text-lg text-gray-600">
+                    {currentHalf === 1 ? '전반' : '후반'} (총 {formatTime(totalGameTime)} / {formatTime(GAME_DURATION_SEC)})
+                  </div>
+                  
+                  {/* ⚽ 스코어 보드 추가 ⚽ */}
+                  <div className="flex justify-center items-center gap-6 my-4">
+                    {/* Team A (Yellow) Score */}
+                    <div className="flex flex-col items-center">
+                      <h3 className="text-xl font-bold text-yellow-800 mb-2">옐로</h3>
+                      <div className="text-6xl font-extrabold text-yellow-600">{score.teamA}</div>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => updateScore('teamA', 1)} className="px-3 py-1 bg-green-500 text-white rounded-lg text-lg">+</button>
+                        <button onClick={() => updateScore('teamA', -1)} className="px-3 py-1 bg-red-500 text-white rounded-lg text-lg">-</button>
+                      </div>
+                    </div>
+                    
+                    <span className="text-4xl font-extrabold text-gray-500">:</span>
 
-            {isKeeperAlert && renderKeeperAlert()}
-            {isPlayerAlert && renderPlayerAlert()}
-            
+                    {/* Team B (Blue) Score */}
+                    <div className="flex flex-col items-center">
+                      <h3 className="text-xl font-bold text-blue-800 mb-2">블루</h3>
+                      <div className="text-6xl font-extrabold text-blue-600">{score.teamB}</div>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => updateScore('teamB', 1)} className="px-3 py-1 bg-green-500 text-white rounded-lg text-lg">+</button>
+                        <button onClick={() => updateScore('teamB', -1)} className="px-3 py-1 bg-red-500 text-white rounded-lg text-lg">-</button>
+                      </div>
+                    </div>
+                  </div>
+                  {/* ⚽ 스코어 보드 끝 ⚽ */}
+
+                  {isKeeperChangeTime ? (
+                    <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg p-4 mt-4">
+                      <div className="text-xl font-bold text-yellow-800 mb-2">키퍼 교체!</div>
+                      <button
+                        onClick={completeKeeperChange}
+                        className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold"
+                      >
+                        {totalGameTime >= GAME_DURATION_SEC ? '경기 종료 확정' : '교체 완료 및 후반 시작'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex justify-center gap-3 mt-4">
+                      <button
+                        onClick={() => setIsTimerRunning(!isTimerRunning)}
+                        className={`px-6 py-2 rounded-lg font-medium ${
+                          isTimerRunning ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
+                        }`}
+                      >
+                        {isTimerRunning ? <Pause className="w-4 h-4 inline" /> : <Play className="w-4 h-4 inline" />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsTimerRunning(false);
+                          setTimerCount(0);
+                          setTotalGameTime(0);
+                          setIsKeeperChangeTime(false);
+                          resetScore(); // 스코어 리셋
+                        }}
+                        className="px-6 py-2 bg-gray-500 text-white rounded-lg"
+                      >
+                        <RotateCcw className="w-4 h-4 inline" />
+                      </button>
+                      <button
+                        onClick={endGame}
+                        className="px-6 py-2 bg-red-500 text-white rounded-lg"
+                      >
+                        종료
+                      </button>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="grid md:grid-cols-2 gap-6 mb-6">
+                  <div className="bg-yellow-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-bold text-yellow-800 mb-3">옐로팀 키퍼</h3>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold">
+                        {teams.teamA[keeperRotation.teamA - 1]?.name || '-'}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        #{keeperRotation.teamA}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-bold text-blue-800 mb-3">블루팀 키퍼</h3>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold">
+                        {teams.teamB[keeperRotation.teamB - 1]?.name || '-'}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        #{keeperRotation.teamB}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border rounded-lg p-4">
+                  <h3 className="text-lg font-bold mb-3 text-center">키퍼 순서표</h3>
+                  <div className="grid grid-cols-4 gap-2 text-sm">
+                    {KEEPER_ROTATION_SCHEDULE.map((keepers, idx) => (
+                      <div key={idx} className={`p-2 rounded ${
+                        currentGame === idx + 1 ? 'bg-yellow-200 border-2 border-yellow-500' : 'bg-gray-100'
+                      }`}>
+                        <div className="font-bold">경기 {idx + 1}</div>
+                        <div className="text-xs text-gray-700">양팀: {keepers[0]}→{keepers[1]}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentView === 'rotation' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">교체 관리</h2>
+                
+                {/* 마지막 경기 스코어 표시 */}
+                <div className="bg-gray-100 p-4 rounded-lg mb-6 text-center">
+                  <div className="text-lg font-bold">직전 경기 ({currentGame - 1}) 결과</div>
+                  <div className="text-2xl font-extrabold text-orange-600">
+                    옐로 {score.teamA} : {score.teamB} 블루
+                  </div>
+                </div>
+
+                {(() => {
+                  const subs = suggestSubstitutions();
+                  return (
+                    <div className="grid md:grid-cols-2 gap-6 mb-6">
+                      <div className="bg-yellow-50 p-4 rounded-lg">
+                        <h3 className="text-lg font-bold text-yellow-800 mb-3">옐로팀 교체</h3>
+                        <div className="mb-3">
+                          <div className="font-medium text-red-600 mb-2">OUT (휴식 필요)</div>
+                          {subs.teamA.out.map(p => (
+                            <div key={p.id} className="p-2 bg-red-100 rounded mb-1">
+                              {p.name} ({p.totalTime.toFixed(1)}분)
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="font-medium text-green-600 mb-2">IN (대기 최소)</div>
+                          {subs.teamA.in.map(p => (
+                            <div key={p.id} className="p-2 bg-green-100 rounded mb-1">
+                              {p.name} ({p.totalTime.toFixed(1)}분)
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-50 p-4 rounded-lg">
+                        <h3 className="text-lg font-bold text-blue-800 mb-3">블루팀 교체</h3>
+                        <div className="mb-3">
+                          <div className="font-medium text-red-600 mb-2">OUT (휴식 필요)</div>
+                          {subs.teamB.out.map(p => (
+                            <div key={p.id} className="p-2 bg-red-100 rounded mb-1">
+                              {p.name} ({p.totalTime.toFixed(1)}분)
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="font-medium text-green-600 mb-2">IN (대기 최소)</div>
+                          {subs.teamB.in.map(p => (
+                            <div key={p.id} className="p-2 bg-green-100 rounded mb-1">
+                              {p.name} ({p.totalTime.toFixed(1)}분)
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex justify-center gap-4">
+                  <button
+                    onClick={applySubstitutions}
+                    className="px-6 py-3 bg-orange-600 text-white rounded-lg font-medium"
+                  >
+                    교체 적용
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('teams')}
+                    className="px-6 py-3 bg-gray-500 text-white rounded-lg font-medium"
+                  >
+                    현재 팀 유지
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-    );
+      </div>
+    </div>
+  );
 };
 
-export default FutsalTeamManager;
+export default FutsalTeamManagerDebug;
