@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, Timer, Play, Pause, RotateCcw, Plus, Trash2, Bell, List } from 'lucide-react';
 
 // --- 상수 설정 (변경 없음) ---
@@ -41,13 +41,23 @@ const FutsalTeamManagerDebug = () => {
   
   const [newPlayer, setNewPlayer] = useState({ name: '', level: 1, team: 'yellow' });
   const [debugLog, setDebugLog] = useState('디버깅 모드');
+ // ✅ 오디오 객체를 제어하기 위한 Ref 추가 (✅ 추가)
+  const audioRef = useRef(null); 
+  const stopAlarm = () => { 
+    if (audioRef.current) { 
+      audioRef.current.pause(); 
+      audioRef.current.currentTime = 0; 
+      audioRef.current = null; 
+    } 
+  }; 
 
   // --- 오디오, 타이머, 상태 업데이트 로직 (이전 코드와 동일) ---
   const playAlarm = () => {
-      try {
+      try {stopAlarm(); // 이전 소리가 있다면 먼저 정지 (✅ 추가)
           const audio = new Audio(ALARM_SOUND_URL);
           audio.volume = 0.5;
           audio.play().catch(e => console.error("Audio playback failed:", e));
+          audioRef.current = audio; 
       } catch (e) {
           console.error("Audio object creation failed:", e);
       }
@@ -174,6 +184,7 @@ const FutsalTeamManagerDebug = () => {
   };
 
   const completeKeeperChange = () => {
+    stopAlarm(); // ✅ 알람 즉시 정지
     const newStats = { ...playerStats };
     const intervalMin = KEEPER_CHANGE_INTERVAL_SEC / 60;
     
@@ -207,6 +218,7 @@ const FutsalTeamManagerDebug = () => {
   };
 
   const endGame = (completed = false) => {
+    stopAlarm(); // ✅ 알람 즉시 정지
     setIsTimerRunning(false);
     setIsKeeperChangeTime(false);
     
@@ -320,7 +332,7 @@ const FutsalTeamManagerDebug = () => {
 
   // --- 렌더링 ---
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-400 via-orange-500 to-yellow-600 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-red-400 via-orange-500 to-yellow-600 mb-4">
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white p-6">
@@ -537,6 +549,12 @@ const FutsalTeamManagerDebug = () => {
                   {isKeeperChangeTime ? (
                     <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg p-4 mt-4">
                       <div className="text-xl font-bold text-yellow-800 mb-2">키퍼 교체!</div>
+                      <button 
+                        onClick={stopAlarm}
+                        className="px-6 py-3 bg-red-500 text-white rounded-lg font-bold mb-4 block mx-auto"
+                      >
+                        소리 끄기
+                      </button>
                       <button
                         onClick={completeKeeperChange}
                         className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold"
