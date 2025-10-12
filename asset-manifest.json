@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.2b7399dd.css",
-    "main.js": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.0756caf8.js",
+    "main.css": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.99f3b64b.css",
+    "main.js": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.c5103014.js",
     "index.html": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/index.html",
-    "main.2b7399dd.css.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.2b7399dd.css.map",
-    "main.0756caf8.js.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.0756caf8.js.map"
+    "main.99f3b64b.css.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/css/main.99f3b64b.css.map",
+    "main.c5103014.js.map": "/FUTSAL_TEAM_MANAGER_FOR_DEBUGING/static/js/main.c5103014.js.map"
   },
   "entrypoints": [
-    "static/css/main.2b7399dd.css",
-    "static/js/main.0756caf8.js"
+    "static/css/main.99f3b64b.css",
+    "static/js/main.c5103014.js"
   ]
 }
