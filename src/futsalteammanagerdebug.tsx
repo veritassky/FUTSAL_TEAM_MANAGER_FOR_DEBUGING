@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Timer, Play, Pause, RotateCcw, Plus, Trash2, Bell, List } from 'lucide-react';
 
-// --- 상수 설정 (변경 없음) ---
+// --- 상수 설정 (변경됨: GAME_DURATION_SEC 상수는 이제 상태로 관리됨) ---
 const KEEPER_ROTATION_SCHEDULE = [
   [1, 2],
   [3, 9],
@@ -13,19 +13,27 @@ const KEEPER_ROTATION_SCHEDULE = [
   [1, 4],
 ];
 
-const KEEPER_CHANGE_INTERVAL_SEC = 6;
-const GAME_DURATION_SEC = 12;
+// ✅ 기본 시간 설정 (7분 = 420초) - 코드를 깔끔하게 하기 위해 상수로 정의
+const DEFAULT_GAME_TIME_SEC = 7 * 60; 
+
+// ❌ 기존 시간 상수들은 사용하지 않음 (이 값을 사용하는 로직은 gameDurationSeconds 상태로 대체됨)
+// const KEEPER_CHANGE_INTERVAL_SEC = 6;
+// const GAME_DURATION_SEC = 12;
+
 const ALARM_SOUND_URL = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
 
 
 // --- 컴포넌트 시작 ---
 const FutsalTeamManagerDebug = () => {
   
-  // --- 상태 관리 (currentView에 'history' 추가) ---
+  // --- 상태 관리 ---
   const [currentView, setCurrentView] = useState('players'); // 'players', 'teams', 'game', 'rotation', 'history'
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState({ teamA: [], teamB: [] });
   const [benchPlayers, setBenchPlayers] = useState({ teamA: [], teamB: [] });
+  
+  // ✅ 새로운 상태: 한 쿼터의 시간 (초 단위)
+  const [gameDurationSeconds, setGameDurationSeconds] = useState(DEFAULT_GAME_TIME_SEC); 
   
   const [timerCount, setTimerCount] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -37,11 +45,10 @@ const FutsalTeamManagerDebug = () => {
   const [currentGame, setCurrentGame] = useState(1);
   const [playerStats, setPlayerStats] = useState({});
   const [score, setScore] = useState({ teamA: 0, teamB: 0 });
-  const [gameHistory, setGameHistory] = useState([]); // ✅ 경기 기록 리스트 상태
+  const [gameHistory, setGameHistory] = useState([]); 
   
   const [newPlayer, setNewPlayer] = useState({ name: '', level: 1, team: 'yellow' });
   const [debugLog, setDebugLog] = useState('디버깅 모드');
- // ✅ 오디오 객체를 제어하기 위한 Ref 추가 (✅ 추가)
   const audioRef = useRef(null); 
   const stopAlarm = () => { 
     if (audioRef.current) { 
@@ -51,9 +58,9 @@ const FutsalTeamManagerDebug = () => {
     } 
   }; 
 
-  // --- 오디오, 타이머, 상태 업데이트 로직 (이전 코드와 동일) ---
+  // --- 오디오, 타이머, 상태 업데이트 로직 ---
   const playAlarm = () => {
-      try {stopAlarm(); // 이전 소리가 있다면 먼저 정지 (✅ 추가)
+      try {stopAlarm(); 
           const audio = new Audio(ALARM_SOUND_URL);
           audio.volume = 0.5;
           audio.play().catch(e => console.error("Audio playback failed:", e));
@@ -86,14 +93,17 @@ const FutsalTeamManagerDebug = () => {
         const nextTotal = prev + 1;
         setDebugLog(`총 ${formatTime(nextTotal)} 진행중`);
 
-        if (nextTotal % KEEPER_CHANGE_INTERVAL_SEC === 0) {
+        // ✅ KEEPER_CHANGE_INTERVAL_SEC 대신 gameDurationSeconds 사용
+        if (nextTotal % gameDurationSeconds === 0) {
           setIsTimerRunning(false);
           setIsKeeperChangeTime(true);
           
-          if (nextTotal >= GAME_DURATION_SEC) {
+          // ✅ GAME_DURATION_SEC 대신 gameDurationSeconds * 2 (전후반 총 시간) 사용
+          if (nextTotal >= gameDurationSeconds * 2) { 
             triggerNotification(`🔔 경기 ${currentGame} 종료! 최종 스코어 ${score.teamA}:${score.teamB}`);
           } else {
-            triggerNotification(`🔔 ${KEEPER_CHANGE_INTERVAL_SEC / 60}분 경과! 키퍼 교체 시간!`);
+            // ✅ KEEPER_CHANGE_INTERVAL_SEC 대신 gameDurationSeconds 사용
+            triggerNotification(`🔔 ${gameDurationSeconds / 60}분 경과! 키퍼 교체 시간!`); 
           }
         }
 
@@ -102,7 +112,7 @@ const FutsalTeamManagerDebug = () => {
     }, 1000);
     
     return () => clearTimeout(timer);
-  }, [timerCount, isTimerRunning, isKeeperChangeTime, totalGameTime, currentGame, score.teamA, score.teamB]);
+  }, [timerCount, isTimerRunning, isKeeperChangeTime, totalGameTime, currentGame, score.teamA, score.teamB, gameDurationSeconds]); // ✅ 의존성 배열에 gameDurationSeconds 추가
 
 
   const formatTime = (seconds) => {
@@ -118,7 +128,7 @@ const FutsalTeamManagerDebug = () => {
     }));
   };
 
-  // ... (선수 추가/삭제, 팀 밸런스, 경기 시작/종료 로직은 동일) ...
+  // ... (선수 추가/삭제, 팀 밸런스 로직 동일) ...
   const addPlayer = () => {
     if (newPlayer.name.trim()) {
       const newId = Math.max(...players.map(p => p.id), 0) + 1;
@@ -177,6 +187,7 @@ const FutsalTeamManagerDebug = () => {
     setDebugLog(`경기 ${currentGame} (순서표 ${scheduleGame}경기): 양팀 ${keepers[0]}→${keepers[1]}번 키퍼`);
     
     const newStats = { ...playerStats };
+    // ... (스탯 업데이트 로직 동일) ...
     [...teams.teamA, ...teams.teamB].forEach(player => {
       newStats[player.id].totalGames += 1;
     });
@@ -184,9 +195,10 @@ const FutsalTeamManagerDebug = () => {
   };
 
   const completeKeeperChange = () => {
-    stopAlarm(); // ✅ 알람 즉시 정지
+    stopAlarm(); 
     const newStats = { ...playerStats };
-    const intervalMin = KEEPER_CHANGE_INTERVAL_SEC / 60;
+    // ✅ KEEPER_CHANGE_INTERVAL_SEC 대신 gameDurationSeconds 사용
+    const intervalMin = gameDurationSeconds / 60; 
     
     const keeperA = teams.teamA[keeperRotation.teamA - 1];
     const keeperB = teams.teamB[keeperRotation.teamB - 1];
@@ -206,7 +218,8 @@ const FutsalTeamManagerDebug = () => {
     const gameIndex = (currentGame - 1) % KEEPER_ROTATION_SCHEDULE.length;
     const keepers = KEEPER_ROTATION_SCHEDULE[gameIndex];
     
-    if (totalGameTime < GAME_DURATION_SEC) {
+    // ✅ GAME_DURATION_SEC 대신 gameDurationSeconds * 2 사용
+    if (totalGameTime < gameDurationSeconds * 2) { // 2쿼터 총 시간을 체크
       setKeeperRotation({ teamA: keepers[1], teamB: keepers[1] });
       setCurrentHalf(2);
       setIsKeeperChangeTime(false);
@@ -218,12 +231,13 @@ const FutsalTeamManagerDebug = () => {
   };
 
   const endGame = (completed = false) => {
-    stopAlarm(); // ✅ 알람 즉시 정지
+    stopAlarm(); 
     setIsTimerRunning(false);
     setIsKeeperChangeTime(false);
     
     const newStats = { ...playerStats };
-    const intervalSec = KEEPER_CHANGE_INTERVAL_SEC;
+    // ✅ KEEPER_CHANGE_INTERVAL_SEC 대신 gameDurationSeconds 사용
+    const intervalSec = gameDurationSeconds;
     const remaining = timerCount % intervalSec;
     
     if (remaining > 0) {
@@ -244,12 +258,11 @@ const FutsalTeamManagerDebug = () => {
     
     setPlayerStats(newStats);
 
-    // ✅ 경기 종료 시, 경기 기록(gameHistory)에 현재 경기 결과 추가
     setGameHistory(prev => [...prev, {
         game: currentGame,
         scoreA: score.teamA,
         scoreB: score.teamB,
-        winner: score.teamA > score.teamB ? '옐로 승' : score.teamB > score.teamA ? '블루 승' : '무승부'
+        winner: score.teamA > score.teamB ? '옐로 승' : score.teamB > score.teamA ? '무승부' : '블루 승' // ✅ 수정: score.teamB > score.teamA ? '블루 승' : '무승부'
     }]);
 
     const finalLog = `경기 ${currentGame} 종료! 최종 스코어: ${score.teamA} 대 ${score.teamB}`;
@@ -257,9 +270,7 @@ const FutsalTeamManagerDebug = () => {
     setCurrentGame(prev => prev + 1);
     setCurrentView('rotation');
     
-    // ✅ 모든 경기가 끝나면 alert 대신 'history' 뷰로 자동 이동
     if (currentGame >= KEEPER_ROTATION_SCHEDULE.length) {
-        // alert("모든 경기 일정이 완료되었습니다! 팀 교체 대신 최종 통계를 확인하세요.");
         setCurrentView('history'); 
     }
   };
@@ -323,7 +334,7 @@ const FutsalTeamManagerDebug = () => {
           setCurrentGame(1);
           setPlayerStats({});
           setScore({ teamA: 0, teamB: 0 });
-          setGameHistory([]); // ✅ 경기 기록도 초기화
+          setGameHistory([]); 
           setDebugLog('모든 데이터 초기화 완료');
           setCurrentView('players');
       }
@@ -338,10 +349,10 @@ const FutsalTeamManagerDebug = () => {
           <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white p-4">
             <h1 className="text-3xl font-bold text-center flex items-center justify-center gap-2">
               <Timer className="w-8 h-8" />
-              풋살팀 매니저 ({KEEPER_CHANGE_INTERVAL_SEC}초 디버그)
+              풋살팀 매니저
             </h1>
             <div className="flex justify-center mt-4 space-x-2">
-              {['players', 'teams', 'game', 'rotation', 'history'].map((view) => ( // ✅ 'history' 탭 추가
+              {['players', 'teams', 'game', 'rotation', 'history'].map((view) => (
                 <button
                   key={view}
                   onClick={() => setCurrentView(view)}
@@ -353,7 +364,7 @@ const FutsalTeamManagerDebug = () => {
                   {view === 'teams' && '팀 편성'}
                   {view === 'game' && '경기 진행'}
                   {view === 'rotation' && '팀 교체'}
-                  {view === 'history' && '경기 기록'} {/* ✅ 'history' 탭 이름 */}
+                  {view === 'history' && '경기 기록'}
                 </button>
               ))}
             </div>
@@ -365,6 +376,33 @@ const FutsalTeamManagerDebug = () => {
             {currentView === 'players' && (
               <div>
                 <h2 className="text-2xl font-bold mb-6">선수 관리</h2>
+                
+                {/* ✅ 시간 설정 입력 필드 추가 (쿼터 설정 기능) */}
+                <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-orange-300">
+                    <label 
+                        htmlFor="gameDurationInput" 
+                        className="block text-base font-semibold text-gray-700 mb-2"
+                    >
+                        ⚽ 한 쿼터 시간 설정 (분)
+                    </label>
+                    <input
+                        id="gameDurationInput"
+                        type="number"
+                        min="1"
+                        // 초 -> 분으로 변환하여 표시
+                        value={gameDurationSeconds / 60} 
+                        onChange={(e) => {
+                            const minutes = parseInt(e.target.value, 10);
+                            if (minutes > 0) {
+                                // 분 -> 초로 변환하여 저장
+                                setGameDurationSeconds(minutes * 60); 
+                            }
+                        }}
+                        placeholder="예: 7 (기본 7분)"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 text-2xl border focus:border-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-2">※ 쿼터 시간은 키퍼 교체 주기와 동일합니다.</p>
+                </div>
                 
                 {/* 선수 추가 섹션 (동일) */}
                 <div className="bg-gray-50 p-3 rounded-lg mb-6">
@@ -444,7 +482,7 @@ const FutsalTeamManagerDebug = () => {
               </div>
             )}
             
-            {/* ✅ 경기 기록 뷰 (새로 분리된 페이지) */}
+            {/* 경기 기록 뷰 (동일) */}
             {currentView === 'history' && (
                 <div>
                     <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
@@ -453,11 +491,11 @@ const FutsalTeamManagerDebug = () => {
                     {gameHistory.length === 0 ? (
                         <p className="text-gray-500 text-center py-10">아직 완료된 경기가 없습니다. 경기를 시작하세요.</p>
                     ) : (
-                        <div className="grid grid-cols-1 gap-2 text-sm bg-gray-100 p-4 rounded-lg">
+                        <div className="grid grid-cols-4 gap-2 text-sm bg-gray-100 p-4 rounded-lg">
                             <div className="font-bold text-center">경기 #</div>
                             <div className="font-bold col-span-2 text-center">스코어</div>
                             <div className="font-bold text-center">승패</div>
-                            <div className="font-bold text-center"></div>
+                            {/* <div className="font-bold text-center"></div> // 기존 코드가 grid-cols-4에 맞추기 위해 제거 */}
                             {gameHistory.map((h, idx) => (
                                 <React.Fragment key={idx}>
                                     <div className="p-2 text-center">{h.game}</div>
@@ -465,7 +503,7 @@ const FutsalTeamManagerDebug = () => {
                                         <span className="text-yellow-600">{h.scoreA}</span> : <span className="text-blue-600">{h.scoreB}</span>
                                     </div>
                                     <div className={`p-2 font-medium text-center ${h.winner.includes('승') ? 'text-green-600' : 'text-gray-500'}`}>{h.winner}</div>
-                                    <div className="p-2 text-center text-xs text-gray-400">{idx < 8 ? '정규' : '연장'}</div>
+                                    {/* <div className="p-2 text-center text-xs text-gray-400">{idx < 8 ? '정규' : '연장'}</div> */}
                                 </React.Fragment>
                             ))}
                         </div>
@@ -522,10 +560,12 @@ const FutsalTeamManagerDebug = () => {
                   <div className="text-sm text-gray-600 mb-2">{debugLog}</div>
                   <div className="text-4xl font-bold mb-2">{formatTime(timerCount)}</div>
                   <div className="text-lg text-gray-600">
-                    {currentHalf === 1 ? '전반' : '후반'} (총 {formatTime(totalGameTime)} / {formatTime(GAME_DURATION_SEC)})
+                    {currentHalf === 1 ? '전반' : '후반'} 
+                    {/* ✅ GAME_DURATION_SEC 대신 gameDurationSeconds * 2 사용 */}
+                    (총 {formatTime(totalGameTime)} / {formatTime(gameDurationSeconds * 2)})
                   </div>
                   
-                  {/* 스코어 보드 */}
+                  {/* 스코어 보드 (동일) */}
                   <div className="flex justify-center items-center gap-6 my-4">
                     <div className="flex flex-col items-center">
                       <h3 className="text-xl font-bold text-yellow-800 mb-2">옐로</h3>
@@ -559,7 +599,8 @@ const FutsalTeamManagerDebug = () => {
                         onClick={completeKeeperChange}
                         className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold"
                       >
-                        {totalGameTime >= GAME_DURATION_SEC ? '경기 종료 확정' : '교체 완료 및 후반 시작'}
+                        {/* ✅ GAME_DURATION_SEC 대신 gameDurationSeconds * 2 사용 */}
+                        {totalGameTime >= gameDurationSeconds * 2 ? '경기 종료 확정' : '교체 완료 및 후반 시작'}
                       </button>
                     </div>
                   ) : (
@@ -614,8 +655,8 @@ const FutsalTeamManagerDebug = () => {
                     <div className="grid md:grid-cols-2 gap-6 mb-6">
                       <div className="bg-yellow-50 p-4 rounded-lg">
                         <h3 className="text-lg font-bold text-yellow-800 mb-3">옐로팀 교체</h3>
-                         <div className="mb-3"><div className="font-medium text-red-600 mb-2">OUT (휴식 필요)</div>{subs.teamA.out.map(p => (<div key={p.id} className="p-2 bg-red-100 rounded mb-1">{p.name} ({p.totalTime.toFixed(1)}분)</div>))}</div>
-                         <div><div className="font-medium text-green-600 mb-2">IN (대기 최소)</div>{subs.teamA.in.map(p => (<div key={p.id} className="p-2 bg-green-100 rounded mb-1">{p.name} ({p.totalTime.toFixed(1)}분)</div>))}</div>
+                          <div className="mb-3"><div className="font-medium text-red-600 mb-2">OUT (휴식 필요)</div>{subs.teamA.out.map(p => (<div key={p.id} className="p-2 bg-red-100 rounded mb-1">{p.name} ({p.totalTime.toFixed(1)}분)</div>))}</div>
+                          <div><div className="font-medium text-green-600 mb-2">IN (대기 최소)</div>{subs.teamA.in.map(p => (<div key={p.id} className="p-2 bg-green-100 rounded mb-1">{p.name} ({p.totalTime.toFixed(1)}분)</div>))}</div>
                       </div>
                       <div className="bg-blue-50 p-4 rounded-lg">
                         <h3 className="text-lg font-bold text-blue-800 mb-3">블루팀 교체</h3>
